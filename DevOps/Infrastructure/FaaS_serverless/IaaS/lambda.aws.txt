@@ -653,9 +653,10 @@ IMAGE.Command                     #STR_ARR. Like Docker CMD, i.e. arguments to E
 IMAGE.WorkingDirectory            #STR. Like Docker WORKDIR
 ENV ==>                           #Automatically filled by FUNC_VERSION.Environment
 
-public.ecr.aws/lambda/            #Recommended base images
+public.ecr.aws/lambda/            #Recommended base images (called "AWS [managed] base image for Lambda")
  RUNTIME[-ARCH]                   #Follow every constraint, including implementing the custom runtime API
                                   #Exposes following ENVVARs: LAMBDA_TASK_ROOT, LAMBDA_RUNTIME_DIR
+                                  #RUNTIME can be "provided" (called "OS-only base image")
 
                                   ┌────────────────────┐
                                   │   CODE IMAGE IAC   │
@@ -987,6 +988,9 @@ CUSTOM RUNTIME ==>                #When FUNC_VERSION.Runtime 'provided*'
                                   #FUNC_CODE|LAYER must include an executable script at '/bootstrap', which is run
                                   #Only partially documented for the moment
 
+RUNTIME INTERFACE CLIENT (RIC) ==>#Client for the runtime API
+                                  #Available for every RUNTIME language, and also Rust and Go
+
 ENVVAR LAMBDA_TASK_ROOT           #FUNC_CODE's 'DIR', e.g. /var/task
                                   #Used as cwd, i.e. should change cwd to it during initialization
 
@@ -1263,7 +1267,7 @@ FUNC_LOGGING.LogFormat            #  - 'Text' (def): flat
                                   #  - 'JSON': SLOG
                                   #Also applies to application logs:
                                   #  - if 'JSON', must print 'ALOG_JSON' on stdout|stderr
-                                  #  - with runtime is node|java|python
+                                  #  - with runtime node|java|python:
                                   #     - can use runtime-specific logger, e.g. console.LEVEL() with node
                                   #     - it automatically converts to ALOG
 
@@ -1296,6 +1300,13 @@ ALOG.requestId                    #'REQ_ID' (def: current)
 PERMISSIONS ==>                   #For FUNC_LOGGING, FUNC_VERSION.Role must be allowed PACTIONs:
                                   #  - logs:CreateLogGroup
                                   #  - logs:CreateLogStream|PutLogEvents on LOG_GROUP
+
+                                  ┌─────────────────┐
+                                  │   LOGGING SDK   │
+                                  └─────────────────┘
+
+@aws-lambda-powertools/logger     #Node.js logger made for AWS Lambda
+                                  #See its doc
 
                                   ┌─────────────────┐
                                   │   LOGGING IAC   │
@@ -1821,7 +1832,9 @@ FUNC_INSTANCE                     #When a FUNC_VERSION is first invoked, a FUNC_
                                   #     - done sync, i.e. might freeze in the middle of any async ongoing logic
                                   #        - can workaround this by performing any one-time async logic in the main handler,
                                   #          but guarding it using a top-level BOOL
+                                  #  - not charged
                                   #  - max 10s
+                                  #     - otherwise, restarted, slower and charged
                                   #After each INVOCATION:
                                   #  - the FUNC_INSTANCE stays up to be re-used by the next INVOCATION
                                   #  - the environment is frozen
@@ -1952,13 +1965,14 @@ INVOCATION_REQ_RPROPS.triggers    #TRIGGER_OBJ
                                   └───────────────┘
 
 INVOCATION_RES.EventStream        #Like INVOCATION_RES.ResponseBody but streamed:
-                                  #  - each payload is a INVOCATION_RES_CHUNK
-                                  #  - one INVOCATION_RES_END sent at end
+                                  #  - each payload is an INVOCATION_RES_EVENT
+                                  #  - most payloads have a PayloadChunk
+                                  #  - the last payload has an InvokeComplete
                                   #Uses HTTP 1.1 chunked transfer encoding
+                                  #INVOCATION_REQ.InvocationType cannot be 'Event'
                                   #Only with Node runtime
                                   #Total max size: 20MB
                                   #Max bandwidth: 2MB/s
-                                  #With JavaScript SDK, this is an ASYNC_ITERABLE of INVOCATION_RES_EVENT
 
 INVOCATION_RES_EVENT.PayloadChunk #INVOCATION_RES_CHUNK
 INVOCATION_RES_CHUNK.Payload      #'BASE64'
@@ -1985,19 +1999,35 @@ PACTION lambda:InvokeFunction     #Used for InvokeWithResponseStream() instead
                                   └───────────────────┘
 
 POST /functions                   #Req: INVOCATION_REQ
- /SHORT_FUNC_VERSION_ARN          #  - InvocationType cannot be 'Event'
- /response-streaming-invocations  #Res: INVOCATION_RES
-InvokeWithResponseStream()        #  - ResponseBody -> EventStream
-                                  #  - FunctionError|LogResult -> INVOCATION_RES_END.*
-                                  #Not with CLI
+ /SHORT_FUNC_VERSION_ARN          #Res: INVOCATION_RES
+ /response-streaming-invocations  #  - ResponseBody -> EventStream
+InvokeWithResponseStream()        #  - FunctionError|LogResult -> INVOCATION_RES_END.*
+
+                                  ┌────────────────────────┐
+                                  │   STREAMING FUNCTION   │
+                                  └────────────────────────┘
+
+awslambda                         #Global variable
+awslambda.streamifyResponse       #Must use this as the Node.js HANDLER instead of FUNC(REQ, NCONTEXT)->>RES
+ (FUNC(REQ, OSTREAM, NCONTEXT)->>)#Must write STR chunks to OSTREAM, then call OSTREAM.end()
+
+awslambda.HttpResponseStream.from #Used to set response status|headers
+ (OSTREAM[, OPTS])->OSTREAM2      #Must then write to OSTREAM2 instead
+OPTS.statusCode|headers|cookies   #Like FUNC_URL_RES.*, i.e. sets response status|headers
+
+OSTREAM.setContentType('MIME')    #Sets INVOCATION_RES.ResponseStreamContentType
 
                                   ┌───────────────────┐
                                   │   STREAMING SDK   │
                                   └───────────────────┘
 
-awslambda.streamifyResponse       #Must use this Node.js HANDLER
- (FUNC(REQ, OSTREAM, NCONTEXT)->>)#Must write STR chunks to OSTREAM, then call OSTREAM.end()
-OSTREAM.setContentType('MIME')    #Sets INVOCATION_RES.ResponseStreamContentType
+INVOCATION_RES.EventStream        #ASYNC_ITERABLE of INVOCATION_RES_EVENT
+
+                                  ┌───────────────────┐
+                                  │   STREAMING CLI   │
+                                  └───────────────────┘
+
+STREAMING WITH CLI ==>            #Not available
 
                                   ┌───────────────────┐
                                   │   STREAMING IAC   │
@@ -2532,6 +2562,15 @@ EVENT_SOURCE.BatchSize            #Batch each NUM records from the source togeth
 EVENT_SOURCE                      #NUM (in secs). Maximum duration to gather records for each batch
  .MaximumBatchingWindowInSeconds  #Def: 500ms, min: 0, max: 300
 
+EVENT_SOURCE.StartingPosition     #STR. Position where to start reading stream source, among:
+                                  #  - 'LATEST': at most recent time
+                                  #  - 'AT_TIMESTAMP': at specific time
+                                  #     - not with DynamoDB
+                                  #  - 'TRIM_HORIZON'
+                                  #Not with SQS nor MQ
+EVENT_SOURCE
+ .StartingPositionTimestamp       #DATE_NUM when EVENT_SOURCE 'AT_TIMESTAMP'
+
 EVENT_SOURCE                      #SOURCE_ACCESS_ARR
  .SourceAccessConfigurations      #Only authorize specific source
 SOURCE_ACCESS.Type                #SERVICE-specific, see below
@@ -2553,12 +2592,12 @@ COND_KEY lambda:FunctionArn       #FUNC_VERSION_ARN. Only with *EventSourceMappi
 
 POST /event-source-mappings       #Req: EVENT_SOURCE
 CreateEventSourceMapping()        #  - FunctionArn -> FunctionName SHORT_FUNC_VERSION_ARN
-                                  #  - no UUID, LastModified, LastProcessingResult, StateTransitionReason, FilterCriteriaError
+                                  #  - no EventSourceMappingArn, UUID, LastModified, LastProcessingResult, StateTransitionReason, FilterCriteriaError
                                   #  - State -> Enabled BOOL
                                   #Res: EVENT_SOURCE
 PUT /event-source-mappings        #Req: EVENT_SOURCE
  /EVENT_SOURCE_MID                #  - FunctionArn -> FunctionName SHORT_FUNC_VERSION_ARN
-UpdateEventSourceMapping()        #  - no UUID, LastModified, LastProcessingResult, StateTransitionReason, FilterCriteriaError
+UpdateEventSourceMapping()        #  - no EventSourceMappingArn, UUID, LastModified, LastProcessingResult, StateTransitionReason, FilterCriteriaError
                                   #  - no EventSourceArn, StartPosition*, Amazon|SelfManagedKafkaEventSourceConfig,
                                   #    SelfManagedEventSource, Queues, Topics, Tags
                                   #  - State -> Enabled BOOL
@@ -2581,9 +2620,10 @@ DeleteEventSourceMapping()        #Res: EVENT_SOURCE
                                   └────────────────────┘
 
 AWS::Lambda::EventSourceMapping   #RESPROPs:
-                                  #  - FunctionName, EventSourceArn, BatchSize, MaximumBatchingWindowInSeconds, SourceAccessConfigurations
+                                  #  - FunctionName, EventSourceArn, BatchSize, MaximumBatchingWindowInSeconds,
+                                  #    SourceAccessConfigurations, StartingPosition[Timestamp]
                                   #  - Enabled BOOL
-                                  #RESATTRs: Id
+                                  #RESATTRs: EventSourceMappingArn, Id
 
 CFUNCTION_OPTS.events             #CCEVENT_SOURCE_ARR
 ICANYFUNC.addEventSource          #Creates CEVENT_SOURCEs
@@ -2602,12 +2642,39 @@ ICEVENT_SOURCE
 ICEVENT_SOURCE
  .eventSourceMappingId            #EVENT_SOURCE.UUID
 OPTS.target                       #ICANYFUNC. EVENT_SOURCE.FunctionArn
-OPTS.eventSourceArn|batchSize     #EVENT_SOURCE.*
+OPTS.eventSourceArn|batchSize
+ |startingPosition[Timestamp]     #EVENT_SOURCE.*
 OPTS.enabled                      #BOOL (def: true). EVENT_SOURCE.State
 OPTS.maxBatchingWindow            #DURATION. EVENT_SOURCE.MaximumBatchingWindowInSeconds
 OPTS.sourceAccessConfigurations   #SOURCE_ACCESS_ARR among:
                                   #  - SourceAccessConfigurationType.STR (preferred)
                                   #  - SourceAccessConfigurationType.of(STR)
+
+                                  ┌────────────────────────┐
+                                  │   BATCH MAIN METRICS   │
+                                  └────────────────────────┘
+
+AWS/Lambda/IteratorAge            #NUM of ms for records to be read
+                                  #I.e. average age of EVENT_SOURCE.StartingPosition[Timestamp] record
+                                  #Not with Kafka
+                                  #cdk-monitoring-constructs:
+                                  #  - max: METRIC, WIDGET, MALARM MaxIteratorAge > CXALARM_OPTS.maxAgeInMillis
+                                  #  - only if CXMONITORING_OPTS.isIterator true (def)
+
+                                  ┌─────────────────────┐
+                                  │   BATCH MAIN LINT   │
+                                  └─────────────────────┘
+
+cfn-lint E3633                    #EVENT_SOURCE.StartingPosition must be set
+cfn-lint E3634                    #Do not use EVENT_SOURCE.StartingPosition when using SQS EVENT_SOURCE
+
+                                  ┌────────────────────┐
+                                  │   BATCH FUNCTION   │
+                                  └────────────────────┘
+
+REQ                               #REQ passed to FUNCTION is SERVICE-specific
+
+@aws-lambda-powertools/batch      #Helper for the EVENT_SOURCE's FUNCTION (see its doc)
 
                                   ┌──────────────────┐
                                   │   BATCH FILTER   │
@@ -2693,14 +2760,6 @@ EVENT_SOURCE
  .Endpoints
  .KAFKA_BOOTSTRAP_SERVERS         #Self-managed Kafka source 'HOST:PORT'_ARR
 
-EVENT_SOURCE.StartingPosition     #STR. Position where to start reading stream source, among:
-                                  #  - 'LATEST': at most recent time
-                                  #  - 'AT_TIMESTAMP': at specific time
-                                  #     - not with DynamoDB
-                                  #  - 'TRIM_HORIZON'
-EVENT_SOURCE
- .StartingPositionTimestamp       #DATE_NUM when EVENT_SOURCE 'AT_TIMESTAMP'
-
 SOURCE_ACCESS.Type                #STR among:
                                   #  - 'SASL_SCRAM_512_AUTH'
                                   #  (self-managed only)
@@ -2726,7 +2785,7 @@ AWSLambdaMSKExecutionRole         #AWS managed POLICYs for FUNC_VERSION.Role
                                   └─────────────────────┘
 
 AWS::Lambda::EventSourceMapping   #Includes RESPROPs: Topics, AmazonManagedKafkaEventSourceConfig, SelfManagedKafkaEventSourceConfig,
-                                  #SelfManagedEventSource, StartingPosition[Timestamp]
+                                  #SelfManagedEventSource
 
 new ManagedKafkaEventSource(OPTS) #CCEVENT_SOURCE
 OPTS.*                            #Like CEVENT_SOURCE_OPTS.* except:
@@ -2753,31 +2812,15 @@ CEVENT_SOURCE_OPTS                #Either:
 CEVENT_SOURCE_OPTS
  .kafkaBootstrapServers           #'HOST:PORT'_ARR. EVENT_SOURCE.SelfManagedEventSource.Endpoints.KAFKA_BOOTSTRAP_SERVERS
 
-CEVENT_SOURCE_OPTS
- .startingPosition[Timestamp]     #EVENT_SOURCE.*
-
                                   ┌─────────────────────────┐
                                   │   BATCH KAFKA METRICS   │
                                   └─────────────────────────┘
 
-AWS/Lambda/IteratorAge            #NUM of ms for stream records to be read
-                                  #I.e. average age of EVENT_SOURCE.StartingPosition[Timestamp] record
-                                  #cdk-monitoring-constructs:
-                                  #  - max: METRIC, WIDGET, MALARM MaxIteratorAge > CXALARM_OPTS.maxAgeInMillis
-                                  #  - only if CXMONITORING_OPTS.isIterator true (def)
-
-AWS/Lambda/OffsetLag              #NUM of ms for Kafka records to be picked up
+AWS/Lambda/OffsetLag              #NUM of ms for records to be picked up
                                   #I.e. duration between last record write to a topic, and last record read
                                   #cdk-monitoring-constructs:
                                   #  - max: METRIC, WIDGET, MALARM MaxOffsetLag > CXALARM_OPTS.maxOffsetLag
                                   #  - only if CXMONITORING_OPTS.isOffsetLag true (def: false)
-
-                                  ┌──────────────────────┐
-                                  │   BATCH KAFKA LINT   │
-                                  └──────────────────────┘
-
-cfn-lint E3633                    #EVENT_SOURCE.StartingPosition must be set
-cfn-lint E3634                    #Do not use EVENT_SOURCE.StartingPosition when using SQS EVENT_SOURCE
 
                                   ┌──────────────┐
                                   │   BATCH MQ   │
@@ -2799,17 +2842,64 @@ RETRIES ==>                       #Retries until message expires
 
 AWS::Lambda::EventSourceMapping   #Includes RESPROPs: Queues
 
+                                  ┌───────────────┐
+                                  │   BATCH SQS   │
+                                  └───────────────┘
+
+EVENT_SOURCE.EventSourceArn       #SQS QUEUE_ARN
+
+EVENT_SOURCE.BatchSize            #Same as above, but def 10 and (if FIFO) max 10
+EVENT_SOURCE                      #Same as above, but def 0, i.e. as soon as possible
+ .MaximumBatchingWindowInSeconds  #Also min 1, unless EVENT_SOURCE.BatchSize <=10
+
+EVENT_SOURCE                      #NUM. Max CONCURRENCY
+ .ScalingConfig.MaximumConcurrency#Min 2, max 1e4
+
+EVENT_SOURCE                      #If FUNCTION fails, all RECORDs are considered failed
+ .FunctionResponseTypes           #If ['ReportBatchItemFailures'] (def: [], i.e. disabled):
+                                  #  - FUNCTION can partially succeed
+                                  #     - also known as "partial batch"
+                                  #  - it specifies which RECORD failed or not
+                                  #  - does so with RES: batchItemFailures OBJ_ARR: itemIdentifier 'RECORD_ID'
+                                  #     - 'RECORD_ID' is RECORD.messageId
+                                  #     - only for RECORDs that failed
+
+                                  ┌────────────────────┐
+                                  │   BATCH SQS AUTH   │
+                                  └────────────────────┘
+
+PACTION sqs:ReceiveMessage
+ |ChangeMessageVisibility
+ |GetQueueUrl|DeleteMessage       #Required for SQS EVENT_SOURCE
+ |GetQueueAttributes              #Also kms:*, if needed
+
+AWSLambdaSQSQueueExecutionRole    #AWS managed POLICYs for FUNC_VERSION.Role
+
+                                  ┌───────────────────┐
+                                  │   BATCH SQS IAC   │
+                                  └───────────────────┘
+
+AWS::Lambda::EventSourceMapping   #Includes RESPROPs: BatchSize, MaximumBatchingWindowInSeconds, ScalingConfig, FunctionResponseTypes
+
+new SqsEventSource(ICQUEUE[,OPTS])#CCEVENT_SOURCE
+OPTS.*                            #Like CEVENT_SOURCE_OPTS.*, except:
+                                  #  - no target
+                                  #  - eventSourceArn -> ICQUEUE
+
+CEVENT_SOURCE_OPTS.maxConcurrency #NUM. EVENT_SOURCE.scalingConfig.maximumConcurrency
+
+CEVENT_SOURCE_OPTS
+ .reportBatchItemFailures         #BOOL (def: false). EVENT_SOURCE.FunctionResponseTypes
+
                                   ┌───────────────────┐
                                   │   BATCH KINESIS   │
                                   └───────────────────┘
 
 EVENT_SOURCE.EventSourceArn       #Kinesis STREAM_ARN
 
-EVENT_SOURCE                      #Same as above, but def 0, i.e. as soon as possible
- .MaximumBatchingWindowInSeconds  #Also min 1, unless EVENT_SOURCE.BatchSize <=10
-
 EVENT_SOURCE
- .StartingPosition[Timestamp]     #Like Kafka behavior above
+ .MaximumBatchingWindowInSeconds  #Same as SQS
+EVENT_SOURCE.FunctionResponseTypes#Same as SQS but RECORD_ID is RECORD.kinesis.sequenceNumber
 
 EVENT_SOURCE                      #NUM (in secs). Processing window duration.
  .TumblingWindowInSeconds         #Max 900
@@ -2838,16 +2928,18 @@ AWSLambdaKinesisExecutionRole     #AWS managed POLICYs for FUNC_VERSION.Role
                                   │   BATCH KINESIS IAC   │
                                   └───────────────────────┘
 
-AWS::Lambda::EventSourceMapping   #Includes RESPROPs: TumblingWindowInSeconds, ParallelizationFactor,
-                                  #BisectBatchOnFunctionError, MaximumRetryAttempts, MaximumRecordAgeInSeconds
+AWS::Lambda::EventSourceMapping   #Includes RESPROPs: FunctionResponseTypes, TumblingWindowInSeconds,
+                                  #ParallelizationFactor, BisectBatchOnFunctionError, MaximumRetryAttempts,
+                                  #MaximumRecordAgeInSeconds
 
-new KinesisEventSource(OPTS)      #CCEVENT_SOURCE
+new KinesisEventSource
+ (KINESIS_ISTREAM, OPTS)          #CCEVENT_SOURCE
 OPTS.*                            #Like CEVENT_SOURCE_OPTS.* except:
                                   #  - no target
-                                  #  - eventSourceArn -> streamArn
+                                  #  - eventSourceArn -> KINESIS_ISTREAM
 
 CEVENT_SOURCE_OPTS
- .startingPosition[Timestamp]     #Like Kafka behavior above
+ .reportBatchItemFailures         #Same as SQS
 
 CEVENT_SOURCE_OPTS.tumblingWindow #DURATION. EVENT_SOURCE.TumblingWindowInSeconds
 CEVENT_SOURCE_OPTS
@@ -2858,12 +2950,6 @@ CEVENT_SOURCE_OPTS
 CEVENT_SOURCE_OPTS.retryAttempts  #NUM. EVENT_SOURCE.MaximumRetryAttempts
 CEVENT_SOURCE_OPTS.maxRecordAge   #DURATION. EVENT_SOURCE.maximumRecordAgeInSeconds
 
-                                  ┌───────────────────────────┐
-                                  │   BATCH KINESIS METRICS   │
-                                  └───────────────────────────┘
-
-AWS/Lambda/IteratorAge            #Like Kafka behavior above
-
                                   ┌────────────────────┐
                                   │   BATCH DYNAMODB   │
                                   └────────────────────┘
@@ -2871,17 +2957,15 @@ AWS/Lambda/IteratorAge            #Like Kafka behavior above
 EVENT_SOURCE.EventSourceArn       #DynamoDB STREAM_ARN
 
 EVENT_SOURCE
- .MaximumBatchingWindowInSeconds  #Same behavior as Kinesis
-
-EVENT_SOURCE
- .StartingPosition[Timestamp]     #Like Kafka behavior above
+ .MaximumBatchingWindowInSeconds  #Same as SQS
+EVENT_SOURCE.FunctionResponseTypes#Same as SQS but RECORD_ID is RECORD.dynamodb.SequenceNumber
 
 EVENT_SOURCE
  .TumblingWindowInSeconds
  |ParallelizationFactor
  |BisectBatchOnFunctionError
  |MaximumRetryAttempts
- |MaximumRecordAgeInSeconds       #Like Kinesis behavior above
+ |MaximumRecordAgeInSeconds       #Same as Kinesis
 
                                   ┌─────────────────────────┐
                                   │   BATCH DYNAMODB AUTH   │
@@ -2898,6 +2982,10 @@ AWSLambdaInvocation-DynamoDB      #Same but allow lambda:InvokeFunction, and do 
                                   │   BATCH DYNAMODB IAC   │
                                   └────────────────────────┘
 
+AWS::Lambda::EventSourceMapping   #Includes RESPROPs: FunctionResponseTypes, TumblingWindowInSeconds,
+                                  #ParallelizationFactor, BisectBatchOnFunctionError, MaximumRetryAttempts,
+                                  #MaximumRecordAgeInSeconds
+
 new DynamoEventSource
  (ICTABLE, OPTS)                  #CCEVENT_SOURCE
 OPTS.*                            #Like CEVENT_SOURCE_OPTS.*, except:
@@ -2905,19 +2993,12 @@ OPTS.*                            #Like CEVENT_SOURCE_OPTS.*, except:
                                   #  - eventSourceArn -> ICTABLE
 
 CEVENT_SOURCE_OPTS
- .startingPosition                #Like Kafka behavior above, except no 'AT_TIMESTAMP'
-
-CEVENT_SOURCE_OPTS.tumblingWindow
+ .reportBatchItemFailures
+ |tumblingWindow
  |parallelizationFactor
  |bisectBatchOnError
  |retryAttempts
  |maxRecordAge                    #Like Kinesis behavior above
-
-                                  ┌────────────────────────────┐
-                                  │   BATCH DYNAMODB METRICS   │
-                                  └────────────────────────────┘
-
-AWS/Lambda/IteratorAge            #Like Kafka behavior above
 
                                   ┌──────────────────────┐
                                   │   BATCH DOCUMENTDB   │
@@ -2933,9 +3014,6 @@ DOCUMENTDB_SOURCE.FullDocument    #Whether to send changes as:
                                   #  - 'Default': partial DOCUMENT
                                   #  - 'UpdateLookup': full DOCUMENT + delta
 
-EVENT_SOURCE
- .StartingPosition[Timestamp]     #Like Kafka behavior above
-
 SOURCE_ACCESS.Type                #'BASIC_AUTH'
 
                                   ┌──────────────────────────┐
@@ -2943,55 +3021,6 @@ SOURCE_ACCESS.Type                #'BASIC_AUTH'
                                   └──────────────────────────┘
 
 AWS::Lambda::EventSourceMapping   #Includes RESPROPs: DocumentDBEventSourceConfig
-
-                                  ┌──────────────────────────────┐
-                                  │   BATCH DOCUMENTDB METRICS   │
-                                  └──────────────────────────────┘
-
-AWS/Lambda/IteratorAge            #Like Kafka behavior above
-
-                                  ┌───────────────┐
-                                  │   BATCH SQS   │
-                                  └───────────────┘
-
-EVENT_SOURCE.EventSourceArn       #SQS QUEUE_ARN
-
-EVENT_SOURCE.BatchSize            #Same as above, but def 10 and (if FIFO) max 10
-EVENT_SOURCE
- .MaximumBatchingWindowInSeconds  #Same behavior as Kinesis
-
-EVENT_SOURCE                      #NUM. Max CONCURRENCY
- .ScalingConfig.MaximumConcurrency#Min 2, max 1e4
-
-EVENT_SOURCE
- .FunctionResponseTypes           #Either [] (def) or ['ReportBatchItemFailures']
-
-                                  ┌────────────────────┐
-                                  │   BATCH SQS AUTH   │
-                                  └────────────────────┘
-
-PACTION sqs:ReceiveMessage
- |ChangeMessageVisibility
- |GetQueueUrl|DeleteMessage       #Required for SQS EVENT_SOURCE
- |GetQueueAttributes              #Also kms:*, if needed
-
-AWSLambdaSQSQueueExecutionRole    #AWS managed POLICYs for FUNC_VERSION.Role
-
-                                  ┌───────────────────┐
-                                  │   BATCH SQS IAC   │
-                                  └───────────────────┘
-
-AWS::Lambda::EventSourceMapping   #Includes RESPROPs: ScalingConfig, FunctionResponseTypes
-
-new SqsEventSource(ICQUEUE[,OPTS])#CCEVENT_SOURCE
-OPTS.*                            #Like CEVENT_SOURCE_OPTS.*, except:
-                                  #  - no target
-                                  #  - eventSourceArn -> ICQUEUE
-
-CEVENT_SOURCE_OPTS.maxConcurrency #NUM. EVENT_SOURCE.scalingConfig.maximumConcurrency
-
-CEVENT_SOURCE_OPTS
- .reportBatchItemFailures         #BOOL (def: false). EVENT_SOURCE.FunctionResponseTypes
 
                                   ┌───────────────────────┐
                                   │   BATCH DESTINATION   │
@@ -3376,6 +3405,9 @@ deno-lambda                       #Custom RUNTIME distributed either as:
                                   #  - a LAYER: arn:aws:serverlessrepo:us-east-1:390065572566:applications/den
                                   #  - a Docker image: denoland/deno-lambda
                                   #Version 2.0.0-rc.0 (matching Deno version)
+                                  #It is not maintained anymore:
+                                  #  - instead, should use aws-lambda-adapter
+                                  #  - see Dockerfile at https://docs.deno.com/runtime/tutorials/aws_lambda/#step-2%3A-create-a-dockerfile
 
 HANDLER(...)                      #Like Node
 
@@ -3418,6 +3450,93 @@ ENVVAR PYTHON_PATH                #LAMBDA_RUNTIME_DIR
 /opt/python                       #
 /opt/python
  /lib/pythonVERSION/site-packages #Preferred location for LAYERs packages
+
+                                  ┌────────────────┐
+                                  │   POWERTOOLS   │
+                                  └────────────────┘
+
+@aws-lambda-powertools/*          #Various utilities for Lambda with Node.js
+                                  #Version 2.8.0
+                                  #Exists also in Python, Java, DotNet, but not documented yet
+
+CLOUDFORMATION LAYER ==>          #ACCOUNT_ID 094274105915, name 'AWSLambdaPowertoolsTypeScriptV2', LAYER_VERSION_NUM 23
+powertools-lambda-layer-cdk       #Alternative package, building the LAYER locally with Docker instead
+                                  #I.e. does not seem very useful
+
+                                  ┌────────────────────┐
+                                  │   SERVER ADAPTER   │
+                                  └────────────────────┘
+
+aws-lambda-web-adapter            #For:
+                                  #  - long-running servers
+                                  #  - and/or any server framework (Express, Next.js, Flask, etc.)
+                                  #Version 0.8.4
+
+INSTALLATION ==>                  #It is an external extension
+                                  #Depending on PackageType:
+                                  #  - 'Zip': use LAYER: ACCOUNT_ID 753240598075, name 'LambdaAdapterLayerX86|Arm64', VERSION_NUM 23
+                                  #  - 'Image': in Dockerfile:
+                                  #     - COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:X.Y.Z[-ARCH] /lambda-adapter /opt/extensions/lambda-adapter
+
+FUNC_VERSION.Environment.Variables
+ .AWS_LWA_*                       #Configuration
+
+CALLER ==>                        #Any caller works: FUNC_URL, API Gateway, TRIGGERs, etc.
+                                  #Outside of Lambda, is a noop
+                                  #  - this allows server to still work: locally (including with SAM), on Fargate, on EC2, etc.
+
+WRAPPER SCRIPT ==>                #When PackageType is 'Zip', a "wrapper script" is used, which proxies normal RUNTIME call
+                                  #The following must be set
+ENVVAR AWS_LAMBDA_EXEC_WRAPPER    #Must be set to /opt/bootstrap
+FUNC_VERSION.Handler              #Must be either a binary or a script with shebang, e.g.:
+                                  #  - *.sh calling `node *.js`
+                                  #  - *.js with a Node shebang
+                                  #As opposed to a normal RUNTIME-specific file
+
+ENVVAR AWS_LWA_READINESS_*        #Any FUNC_INSTANCE initialization is only marked as complete once the server is ready
+                                  #I.e. the external extension allows for server startup
+                                  #It does so by polling HTTP GET request every 10ms
+ENVVAR
+ AWS_LWA_READINESS_CHECK_PATH     #'PATH' (def: '/')
+ENVVAR
+ AWS_LWA_READINESS_CHECK_PORT     #PORT_NUM (def: same as AWS_LWA_PORT)
+ENVVAR
+ AWS_LWA_READINESS_CHECK_PROTOCOL #'http' (def) or 'tcp'
+ENVVAR AWS_LWA_READINESS_CHECK
+ _MIN_UNHEALTHY_STATUS            #Minimum STATUS_NUM (def: '500') to consider server not ready
+ENVVAR AWS_LWA_ASYNC_INIT         #'BOOL' (def: 'false'). After 10s of readiness polling:
+                                  #  - signal that the FUNC_INSTANCE initialization is complete
+                                  #     - this prevents FUNC_INSTANCE to restart after 10s initialization timeout,
+                                  #       which is faster and cheaper
+                                  #  - but any upcoming requests are still delayed until readiness passes
+                                  #Should be enabled if server takes >10s to boot
+
+REQUEST PROXYING ==>              #The external extension proxies the request|response, translating it to a normal HTTP request|response
+                                  #I.e. the function can register the server as if it was not in Lambda, with normal REQ|RES
+                                  #The following HTTP headers are also set
+x-amzn-lambda-context:
+ OBJ_JSON [C]                     #NCONTEXT.* (see below)
+x-amzn-request-context:
+ OBJ_JSON [C]                     #When called through API Gateway Lambda INTEGRATION: its REQ.* (see its doc)
+
+ENVVAR AWS_LWA_HOST               #Server host (def: '127.0.0.1')
+ENVVAR AWS_LWA_PORT               #Server PORT_NUM (def: '8080')
+                                  #Must not be <=1024, 3000 or 9001
+ENVVAR AWS_LWA_REMOVE_BASE_PATH   #STR to strip from REQ's 'PATH'
+ENVVAR AWS_LWA_PASS_THROUGH_PATH  #'/PATH' (def: '/events') when called by TRIGGERs
+                                  #Used with HTTP_METHOD POST
+
+ENVVAR AWS_LWA_INVOKE_MODE        #'buffered' (def) or 'response_stream'. FUNC_URL.InvokeMode
+ENVVAR AWS_LWA_ENABLE_COMPRESSION #'BOOL' (def: false). Compress response body with gzip unless either:
+                                  #  - Content-Length: <32 [S]
+                                  #  - Content-Type: image* [S]
+ENVVAR                            #'HEADER' (def: none) to rename to Authorization [C]
+ AWS_LWA_AUTHORIZATION_SOURCE     #Meant when using FUNC_URL.AuthType 'AWS_IAM':
+                                  #  - since it uses Authorization [C] itself
+                                  #  - i.e. Lambda itself would use Authorization [C] for it,
+                                  #    then rename 'HEADER' to Authorization [C] for the FUNCTION's code itself
+
+TERMINATION ==>                   #When FUNC_INSTANCE is shutdown, sends SIGTERM, which can be handled (SIGKILL after 500ms)
 
                                   ┌───────────────┐
                                   │   DEBUG CLI   │

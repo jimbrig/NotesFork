@@ -1,0 +1,240 @@
+
+                                  ┏━━━━━━━━━━━┓
+                                  ┃   MIDDY   ┃
+                                  ┗━━━━━━━━━━━┛
+
+VERSION ==>                       #5.5.0
+
+GOAL ==>                          #Server middleware for AWS Lambda
+
+                                  ┌──────────┐
+                                  │   CORE   │
+                                  └──────────┘
+
+@middy/core                       #Package name
+
+MIDDY([HANDLER][, OPTS])
+ ->MHANDLER                       #Wraps Lambda HANDLER(REQ, NCONTEXT)->>RES (def: noop)
+MHANDLER.handler(HANDLER)
+ ->MHANDLER                       #[Re-]set HANDLER
+
+                                  ┌────────────────┐
+                                  │   MIDDLEWARE   │
+                                  └────────────────┘
+
+MHANDLER.use(MIDDY_MDWR[_ARR])    #MIDDY_MDWR: before STEP, after STEP, onError STEP
+ ->MHANDLER                       #Calls MHANDLER.before|after|onError()
+
+MHANDLER.before(STEP)->MHANDLER   #Called before HANDLER
+
+MHANDLER.after(STEP)->MHANDLER    #Called after HANDLER (unless it threw)
+
+MHANDLER.onError(STEP)->MHANDLER  #Called if any of the following throws:
+                                  #  - HANDLER
+                                  #     - including OPTS.before|afterHandler()
+                                  #  - 'before|after' STEPs
+                                  #     - including their OPTS.before|afterMiddleware()
+                                  #  - OPTS.timeoutEarlyResponse()
+                                  #Also, not of the above is run anymore
+                                  #Exception is still propagated
+                                  #Not called if OPTS.beforePrefetch|requestStart|requestEnd() throws
+                                  #If an 'onError' STEP throws:
+                                  #  - further 'onError' STEPs are not run
+                                  #  - its exception is thrown instead
+                                  #     - original exception available as ERROR.originalError
+                                  #OPTS.requestEnd() is always run, regardless of exceptions
+                                  #  - providing OPTS.requestStart() has ended and did not throw
+
+                                  ┌──────────┐
+                                  │   STEP   │
+                                  └──────────┘
+
+FUNC(INFO)[->[>]RES]              #STEP
+                                  #Ordered: first registered is first run
+                                  #If RES is returned:
+                                  #  - no more STEP is run
+                                  #  - if 'before' STEP: HANDLER not run
+                                  #  - if 'onError' STEP: exception not thrown|propagated
+                                  #  - RES is returned from MHANDLER
+
+INFO.event                        #REQ
+INFO.context                      #NCONTEXT
+INFO.response                     #RES returned by HANDLER
+                                  #Only set in:
+                                  #  - 'after' STEP
+                                  #  - OPTS.requestEnd(), if HANDLER did not throw
+INFO.error                        #Exception VAL
+                                  #Only set in:
+                                  #  - 'onError' STEP
+                                  #  - OPTS.requestEnd(), if HANDLER threw
+
+                                  ┌────────────┐
+                                  │   EVENTS   │
+                                  └────────────┘
+
+OPTS.beforePrefetch()             #On MIDDY() call
+
+OPTS.requestStart()               #On MHANDLER() start
+OPTS.beforeHandler()              #On HANDLER() start
+OPTS.afterHandler()               #On HANDLER() end (excluding throwing)
+OPTS.requestEnd(INFO)[->>]        #On MHANDLER() end (including throwing)
+
+OPTS.beforeMiddleware(STR)        #Before each STEP. STR is its FUNC.name
+OPTS.afterMiddleware(STR)         #After each STEP. STR is its FUNC.name
+
+                                  ┌───────────┐
+                                  │   STATE   │
+                                  └───────────┘
+
+OPTS|INFO.internal                #MIDDY_CONTEXT (def: {})
+                                  #OBJ to pass information between STEPs, MDWRs and HANDLER
+                                  #Keys should be camelCase'd, with only :alnum:
+
+@middy/util                       #
+getContext(VAL, INFO)->>OBJ       #Returns, according to VAL:
+                                  #  - true -> MIDDY_CONTEXT
+                                  #  - 'VARR'[_ARR] -> { VARR: MIDDY_CONTEXT.VARR, ... }
+                                  #  - { KEY: 'VARR' } -> { KEY: MIDDY_CONTEXT.VARR, ... }
+                                  #VARR:
+                                  #  - can include .VAR or .NUM
+                                  #  - resolves to undefined if any parent key missing
+                                  #OBJ keys are normalized:
+                                  #  - start with NUM -> _NUM
+                                  #  - non-:alnum: character -> _
+                                  #Top-level MIDDY_CONTEXT.* PROMISEs are resolved
+                                  #  - exceptions are propagated, aggregated as ERROR.cause.data EXCEPTION_ARR
+                                  #  - howevere, to avoid unhandled rejections, should make sure they cannot be rejected
+
+                                  ┌───────────┐
+                                  │   CACHE   │
+                                  └───────────┘
+
+@middy/util                       #
+
+                                  ┌─────────────┐
+                                  │   TIMEOUT   │
+                                  └─────────────┘
+
+OPTS.timeoutEarlyInMillis         #NUM (in ms, def: 5)
+                                  #Time out the HANDLER NUMms before the INVOCATION itself times out (NCONTEXT.getRemainingTimeInMillis())
+                                  #'after|onError' STEPs and OPTS.* events are still run
+                                  #  - NUM should be high enough for this logic to run
+
+OPTS.timeoutEarlyResponse         #FUNC()->RES used instead of HANDLER when it times out
+                                  #Def: throw an ERROR with name 'TimeoutError' and cause.package '@middy/core'
+
+{signal: ABORT_SIGNAL}            #Passed as third argument to HANDLER
+                                  #Aborted on HANDLER timeout
+                                  #When HANDLER times out, it is short-circuited with Promise.race(), but it still runs
+                                  #I.e. must use that ABORT_SIGNAL to interrupt any ongoing logic on timeout
+
+                                  ┌───────────────┐
+                                  │   STREAMING   │
+                                  └───────────────┘
+
+OPTS.streamifyResponse            #BOOL (def: false). When using FUNC_URL.InvokeMode 'RESPONSE_STREAM' (see Lambda doc)
+                                  #Use awslambda.streamifyResponse() and awslambda.HttpResponseStream.from() under-the-hood
+
+FUNC(REQ, NCONTEXT)
+ ->>RES_OBJ[.body]                #Must be used as HANDLER instead
+
+RES_OBJ.body                      #ISTREAM|STR (def: '')
+
+RES_OBJ.statusCode                #NUM. Required if returning REQ_OBJ.body, else def 200
+RES_OBJ.headers                   #OBJ
+RES_OBJ.cookies                   #'VAR=VAL[;...]'_ARR
+
+                                  ┌───────────────┐
+                                  │   NORMALIZE   │
+                                  └───────────────┘
+
+@middy/util                       #
+normalizeHttpResponse(INFO)->RES  #Normalizes INFO.response to FUNC_URL_RES or API Gateway MAIN_RES:
+                                  #  - undefined -> {}
+                                  #  - STR -> {statusCode: 200, body: STR}
+                                  #  - def statusCode: 500
+                                  #  - def headers: {}
+                                  #Directly mutates INFO.response, then returns it
+
+                                  ┌───────────┐
+                                  │   ERROR   │
+                                  └───────────┘
+
+@middy/util                       #
+createError(STATUS_NUM
+ [, 'MESSAGE'][, ERROR_OPTS])
+ ->ERROR
+new HttpError(STATUS_NUM
+ [, 'MESSAGE'][, ERROR_OPTS])     #
+
+ERROR.name                        #STATUS-NUM-specific, e.g. 'NoContentError' for 204
+ERROR.message                     #Def: STATUS_NUM-specific, e.g. 'No Content' for 204
+
+ERROR.status[Code]                #STATUS_NUM
+
+ERROR[_OPTS].expose               #BOOL (def: true unless STATUS_NUM 5**)
+                                  #Hint whether stack trace should be shown
+
+ERROR_OPTS.*                      #Passed to Error, e.g. cause, etc.
+
+                                  ┌─────────────────────────┐
+                                  │   CONTENT NEGOTIATION   │
+                                  └─────────────────────────┘
+
+@middy/http-content-negotiation   #
+HTTP-CONTENT-NEGOTIATION
+ ([OPTS])->MIDDY_MDWR             #
+
+OPTS.parseCharsets                #BOOL (def: true). Whether to set NCONTEXT.preferredCharset[s]
+OPTS.availableCharsets            #'CHARSET'_ARR (def: any). Only allow those ones
+NCONTEXT.preferredCharsets        #'CHARSET'_ARR to use in response, based on Accept-Charset [C]
+                                  #Sorted from highest to lowest priority
+                                  #Does not set RES
+                                  #  - instead, other MIDDY_MDWRs (e.g. @middy/http-content-encoding) must use NCONTEXT.preferredCharset[s]
+NCONTEXT.preferredCharset         #Same as:
+                                  #  - NCONTEXT.preferredCharsets[0]
+                                  #  - if undefined: OPTS.availableCharsets[0]
+                                  #     - only if OPTS.defaultToFirstCharset true (def: false)
+OPTS.failOnMismatch               #BOOL (def: true). Throw 406 if NCONTEXT.preferredCharset undefined
+
+OPTS.parseEncodings
+ |availableEncodings
+ |defaultToFirstEncoding          #Same with Accept-Encoding [C] and NCONTEXT.preferredEncoding[s]
+
+OPTS.parseLanguages
+ |availableLanguages
+ |defaultToFirstLanguage          #Same with Accept-Language [C] and NCONTEXT.preferredLanguage[s]
+
+OPTS.parseMediaTypes
+ |availableMediaTypes
+ |defaultToFirstMediaType         #Same with Accept [C] and NCONTEXT.preferredMediaType[s]
+
+                                  ┌─────────────────┐
+                                  │   COMPRESSION   │
+                                  └─────────────────┘
+
+@middy/http-content-encoding      #
+HTTP-CONTENT-ENCODING             #Compress response body, based on Accept-Encoding [C]
+ ([OPTS])->MIDDY_MDWR             #Sets RES:
+                                  #  - body STR
+                                  #  - headers['Content-Encoding'] 'ALGO'
+                                  #  - isBase64Encoded true
+                                  #Do not compress if either:
+                                  #  - no Accept-Encoding [C]
+                                  #  - compressed size is bigger
+                                  #Works with Middy streamifyResponse
+                                  #Must register @middy/http-content-negotiation before (see its doc)
+                                  #  - since it relies on NCONTEXT.preferredEncoding[s]
+
+ALGO                              #'deflate', 'gzip' or 'br'
+OPTS.overridePreferredEncoding    #'ALGO'_ARR. If set, use first ALGO that is also present in NCONTEXT.preferredEncodings
+                                  #If not set, use NCONTEXT.preferredEncoding
+
+OPTS.deflate|gzip|br              #OBJ passed to node:zlib create*Compress(OBJ)
+
+                                  ┌──────────┐
+                                  │   CORS   │
+                                  └──────────┘
+
+@middy/http-cors                  #
+HTTP-CORS([OPTS])->MIDDY_MDWR     #

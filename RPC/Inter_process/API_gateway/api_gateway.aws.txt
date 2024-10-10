@@ -358,9 +358,15 @@ INTEGRATION|IRESP                ~#STR. Whether request|response body should be:
 
 MIME                              #Based on Content-Type [C] and Accept: MIME [S] (only first MIME)
                                   #Def: application/json
-                                  #SDK forces Accept: application/json [S]
                                   #Can use wildcard *
                                   #Can be '$default' as a catch-all
+
+                                  ┌──────────────────┐
+                                  │   PAYLOADS SDK   │
+                                  └──────────────────┘
+
+@aws-sdk/
+ middleware-sdk-api-gateway       #Used internally by SDK to force Accept: application/json [C]
 
                                   ┌──────────────────┐
                                   │   PAYLOADS IAC   │
@@ -1248,7 +1254,9 @@ REQ2.cookies                      #Like FUNC_URL_REQ.*
 REQ0|1
  .multiValueQueryStringParameters
  |multiValueHeaders               #Same but, with ARR values (instead of comma-separated) if duplicate name
-REQ0|1.body
+REQ0|1.body                       #Like FUNC_URL_REQ.*
+QUERY API_GATEWAY_REST           =
+QUERY API_GATEWAY_HTTP          -~#JMESPath 'QUERY' (see its doc) for REQ0|1.body, that JSON parses it
 REQ.isBase64Encoded               #Like FUNC_URL_REQ.*
 
 [REQ_]CONTEXT.stage               #'STAGE'

@@ -1,0 +1,175 @@
+
+                                  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+                                  ┃   POWERTOOLS_LAMBDA_LOGGER   ┃
+                                  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+VERSION ==>                       #See AWS Lambda docs
+                                  #Package '@aws-lambda-powertools/logger'
+
+                                  ┌──────────┐
+                                  │   INIT   │
+                                  └──────────┘
+
+new Logger([OPTS])                #LOGGER
+
+LOGGER.createChild([OPTS])
+ ->LOGGER2                        #Inherits LOGGER's OPTS, CLOG and NCONTEXT
+
+FUNC_VERSION
+ .Environment.Variables.ENVVAR
+process.env.ENVVAR                #Can use either to set ENVVARs
+
+OPTS.customConfigService          #DOPTS. Dynamic OPTS
+
+@LOGGER.injectLambdaContext       #TypeScript DFUNC for the main HANDLER
+ ([NOPTS])                        #At request start: calls LOGGER.addContext(NCONTEXT) + LOGGER.logEventIfEnabled(REQ)
+                                  #At request end: calls LOGGER.resetKeys(), providing NOPTS.resetKeys true
+
+injectLambdaContext
+ (LOGGER[_ARR][, NOPTS])          #Same but as Middy MDWR
+ ->MIDDY_MDWR                     #Imported from '@aws-lambda-powertools/logger/middleware'
+
+                                  ┌───────────┐
+                                  │   PRINT   │
+                                  └───────────┘
+
+LOGGER.LEVEL                      #Prints using console.*(...)
+ ('MESSAGE'|CLOG[, EXTRA...])     #CLOG must include CLOG.message
+                                  #EXTRA is CLOG, ERROR or STR
+
+                                  ┌───────────────────┐
+                                  │   SERIALIZATION   │
+                                  └───────────────────┘
+
+LOG                               #OBJ printed by LOGGER.LEVEL()
+
+LOG SERIALIZATION ==>             #LOG is serialized as JSON
+                                  #Serializes:
+                                  #  - BIGINT
+                                  #  - ERROR as ERROR_OBJ: name, message, stack, cause, location 'LINE:COL'|''
+                                  #Ignores:
+                                  #  - cycles
+                                  #  - empty values: '', null, undefined
+
+ENVVAR POWERTOOLS_DEV=BOOL        #If true, indent JSON
+                                  #If false (def), discards any monkey patching on console.*
+                                  #  - does so by using `node:console` under-the-hood
+                                  #  - e.g. Lambda monkey patches console.* to prefix timestamp, REQ_ID and LEVEL
+                                  #     - this is a problem since output is not JSON anymore then
+                                  #     - i.e. should only be true in local development
+
+OPTS.jsonReplacerFn               #FUNC passed to JSON.stringify(VAL, FUNC)
+
+OPTS.logRecordOrder               #'LOG_KEY'_ARR (def: none). LOG keys order when printed
+                                  #Missing ones are still printed, but ordered last
+
+OPTS.logFormatter                 #FUNC. Customize LOG.*
+                                  #Not documented yet
+XLOG                              #LOG fields only available when using OPTS.logFormatter
+
+                                  ┌───────────┐
+                                  │   LEVEL   │
+                                  └───────────┘
+
+OPTS.logLevel                     #'LEVEL'
+DOPTS.getLogLevel()->'LEVEL'      #Can be 'TRACE', 'DEBUG', 'INFO' (def), 'WARN', 'ERROR', 'CRITICAL', 'SILENT'
+ENVVAR POWERTOOLS_LOG_LEVEL       #Calls:
+LOG.level                         #  - 'TRACE': console.log()
+LOGGER.setLogLevel('LEVEL')       #  - 'CRITICAL': console.error()
+LOGGER.getLevelName()->'LEVEL'    #  - 'SILENT': console.silent() which is a noop in Lambda
+                                  #  - other: console.LEVEL(...)
+
+LOGGER.level                      #Same as NUM: 6|8|12|16|20|24|28 from TRACE to SILENT
+
+FUNC_LOGGING.ApplicationLogLevel  #If set (see Lambda doc), always overrides it (through ENVVAR AWS_LAMBDA_LOG_LEVEL)
+
+LOG.sampling_rate
+DOPTS.getSampleRateValue()->NUM
+ENVVAR                            #NUM (def: 0, i.e. noop)
+ POWERTOOLS_LOGGER_SAMPLE_RATE    #Percentage, from 0 to 1
+OPTS.sampleRateValue              #Randomly sets LEVEL to DEBUG for NUM% of LOGGERs (which usually means % of FUNC_INSTANCEs)
+LOGGER
+ .refreshSampleRateCalculation()  #Re-performs random selection in case LEVEL changed
+
+                                  ┌─────────────────┐
+                                  │   FIELDS MAIN   │
+                                  └─────────────────┘
+
+LOG.message                       #'MESSAGE'
+
+LOG.timestamp                     #'YYYY-MM-DDTHH:MM:SS.SSSZ'
+ENVVAR TZ                         #'TIMEZONE' (def: 'UTC') to use in LOG.timestamp
+
+LOG.service
+OPTS.serviceName
+DOPTS.getServiceName()->'APP_NAME'
+ENVVAR POWERTOOLS_SERVICE_NAME    #'APP_NAME' (def: 'service_undefined')
+
+XLOG.awsRegion
+ENVVAR AWS_REGION                 #'REGION'
+
+XLOG.environment
+DOPTS.getCurrentEnvironment()->STR
+ENVVAR ENVIRONMENT
+OPTS.environment                  #STR. E.g. 'production', 'stage', etc.
+
+LOG.xray_trace_id                 #Xray TRACE_ID, using ENVVAR _X_AMZN_TRACE_ID
+
+                                  ┌────────────────────┐
+                                  │   FIELDS CONTEXT   │
+                                  └────────────────────┘
+
+LOGGER.addContext(NCONTEXT)       #Adds LOG.function_*|cold_start
+                                  #Not present in LOG.*: NCONTEXT.logGroupName|logStreamName|identity|clientContext
+LOG.function_arn                  #'FUNC_VERSION_ARN'
+LOG.function_name                 #'FUNCTION'
+XLOG.function_version             #VERSION_NUM
+LOG.function_request_id           #'REQ_ID'
+LOG.function_memory_size          #NUM (in MB). FUNC_VERSION.MemorySize
+
+LOGGER.isColdStart()->BOOL        #BOOL. Whether FUNC_INSTANCE's cold start
+LOG.cold_start                    #Actually, returns true once, then false
+                                  #  - i.e. should be called only once
+
+                                  ┌────────────────────┐
+                                  │   FIELDS REQUEST   │
+                                  └────────────────────┘
+
+LOGGER.logEventIfEnabled(REQ)     #Calls LOGGER.info('Lambda invocation event')
+LOG.event                         #REQ, when using LOGGER.logEventIfEnabled()
+LOGGER.logEventIfEnabled
+ (..., BOOL)
+NOPTS.logEvent
+LOGGER.shouldLogEvent()->BOOL
+ENVVAR
+ POWERTOOLS_LOGGER_LOG_EVENT=BOOL #BOOL. If false (def), LOGGER.logEventIfEnabled() is noop
+
+                                  ┌───────────────────┐
+                                  │   FIELDS CUSTOM   │
+                                  └───────────────────┘
+
+LOGGER.LEVEL(..., STR)
+LOG.extra                         #STR
+
+LOGGER.LEVEL(..., ERROR)
+LOG.error                         #ERROR_OBJ
+
+CLOG                              #Custom OBJ, merged to LOG
+                                  #From lowest to highest priority:
+                                  #  - LOG.*
+                                  #  - OPTS.persistentKeys
+                                  #  - LOGGER.append*Keys(CLOG)
+                                  #  - LOGGER.level(CLOG)
+                                  #  - EXTRA CLOG
+
+OPTS.persistentKeys
+LOGGER
+ .getPersistentLogAttributes()
+ ->CLOG
+LOGGER.appendPersistentKeys(CLOG)
+LOGGER.removePersistentKeys
+ ('CLOG_KEY'_ARR)                 #CLOG, per FUNC_INSTANCE
+
+LOGGER.appendKeys(CLOG)
+LOGGER.removeKeys('CLOG_KEY'_ARR) #CLOG, per request
+LOGGER.resetKeys()                #LOGGER.resetKeys() must be called at end of each request

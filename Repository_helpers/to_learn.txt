@@ -832,6 +832,7 @@ Type checking:
            - jsonup
      - runtime validation:
         - zod
+           - AWS Lambda: https://github.com/aws-powertools/powertools-lambda-typescript/blob/main/packages/parser
         - io-ts
         - ts-interface-checker
         - typescript-is
@@ -2506,9 +2507,11 @@ Caching:
      - (Ruby) batch-loader
      - (Go) dataloader
   - memoization:
-     - memoizee
-     - mem
-     - memo-decorator
+------ distributed
+     - process
+        - memoizee
+        - mem
+        - memo-decorator
 
 Compression:
   - update:
@@ -4401,7 +4404,9 @@ Logging:
 Monitoring:
   - host metrics (CPU, I/O, network, memory):
      - collecting:
-        - (Go) gostatsd
+--------- Cloudwatch
+        - statsd
+           - (Go) gostatsd
         - opencensus
 ------ dashboard
 ------ alerting
@@ -5375,6 +5380,7 @@ FaaS/serverless:
         - http://serverlesscalc.com/
   - PaaS:
      - serverless serverless:
+        - https://github.com/dherault/serverless-offline
         - https://github.com/JustServerless/awesome-serverless
      - dawson-cli
      - apex
@@ -6767,11 +6773,10 @@ Server framework:
            - eslint-plugin-hapi
      - serverless:
         - hono
-        - (AWS Lambda) serverless-express
-        - (AWS Lambda) serverless-http
-        - (AWS Lambda) lambda-middleware
-        - (AWS Lambda) middy
-        - (AWS Lambda) powertools-lambda-typescript
+        - AWS Lambda:
+           - serverless-express
+           - serverless-http
+           - lambda-middleware
   - MVC:
      - declarative:
         - stimulus
@@ -7214,6 +7219,7 @@ Query:
      - harelba q
      - (GUI) antonycourtney tad
   - JSON:
+------ JMESPath
      - JSON pointer:
         - (Go) gojsonpointer
         - (Java) jackson-json-reference

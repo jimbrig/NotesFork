@@ -4,14 +4,12 @@
                                   ┗━━━━━━━━━┛
 
 TODO:
-  - Lambda web adapter
-     - https://github.com/awslabs/aws-lambda-web-adapter
-     - https://docs.deno.com/runtime/tutorials/aws_lambda
-  - Powertools for Lambda
-     - https://github.com/aws-powertools/powertools-lambda-typescript
-     - https://github.com/aws-powertools/powertools-lambda-layer-cdk
-  - Application Composer
-     - Move CloudFormation designer to own doc, and compare it with Application Composer
+  - https://github.com/middyjs/middy
+     - https://middy.js.org/
+     - including related projects on GitHub
+     - break down middy doc into several docs
+  - Infrastructure Composer
+     - Move CloudFormation designer to own doc, and compare it with Infrastructure Composer
      - also https://github.com/aws-samples/aws-cdk-stack-builder-tool
      - https://aws.amazon.com/about-aws/whats-new/2023/11/aws-lambda-view-export-functions-template-aws-application-composer/
      - https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/app-composer-for-cloudformation.html
@@ -26,6 +24,7 @@ TODO:
      - https://github.com/aws/aws-cdk/tree/main/packages/aws-cdk-lib/aws-sam
      - check difference with `serverless` framework
   - Cloud Control API
+  - Create TypeScript template with CDK, Lambda, etc.
 
 VERSION ==>                       #2.156.0
                                   #Monorepo, i.e. same version for all packages
@@ -1341,6 +1340,8 @@ awscdk-service-spec               #Monorepo with @cdklabs/tskb, @cdklabs/typewri
                                   #     - list of RESOURCE METRICs
                                   #     - fixes when SPEC has errors
 
+TAGS ==>                          #See AWS tags doc
+
                                   ┌──────────────────────────┐
                                   │   RESOURCE L1 METADATA   │
                                   └──────────────────────────┘
@@ -1356,72 +1357,6 @@ cdk diff|deploy|import|destroy    #BOOL (def: true). Enables TEMPLATE.Resources.
  |list|metadata --path-metadata   #Used by `cdk metadata|diff|import`
 TEMPLATE.Resources.RESOURCE
  .Metadata['aws:cdk:path']        #NID
-
-                                  ┌─────────────────────┐
-                                  │   TAGS HIGH-LEVEL   │
-                                  └─────────────────────┘
-
-TAGS ==>                          #Only for RESOURCEs that have TAGS
-TagManager.isTaggable[V2]
- (CSRESOURCE)->BOOL               #Whether can have TAGS
-
-OPTS.tags                         #TAGS_FOBJ. TEMPLATE.Resources.RESOURCE.Properties.TAGPROP
-CSRESOURCE.tagsRaw                #TAGPROP is RESTYPE-specific
-
-Tags.of(CSRESOURCE)->CTAGS        #
-CTAGS.add('KEY', 'VAL'[, TOPTS])  #Add|remove TAG, using underlying CTAGM
-CTAGS.remove('KEY', [, TOPTS])    #Uses ASPECTS, i.e. done on both CSRESOURCE and its descendants
-
-new Tag('KEY', 'VAL'[, TOPTS])    #CTAGT
-CTAGT.key                         #'KEY'
-CTAGT.value                       #'VAL'
-CTAGT.visit(CSRESOURCE)           #Add TAG, using underlying CTAGM
-                                  #Unlike CTAGS, does not use ASPECTS, i.e. not applied on descendants
-
-new RemoveTag('KEY'[, TOPTS])     #Like CTAGT but removing TAG instead
-
-TOPTS.includeResourceTypes        #'RESTYPE'_ARR. Do not set TAG unless its 'RESTYPE' matches
-                                  #Meant for CTAGS recursion on descendants
-TOPTS.excludeResourceTypes        #'RESTYPE'_ARR. Inverse
-
-TOPTS.priority                    #NUM. Merging priority when adding|removing same TAG multiple times
-                                  #Def:
-                                  #  - removing: 200
-                                  #  - adding: 100
-                                  #  - CTAGM.renderTags()'s TAGS_OBJ: 50
-                                  #  - CTAGM.setTag|removeTag(): 0
-
-                                  ┌────────────────────┐
-                                  │   TAGS LOW-LEVEL   │
-                                  └────────────────────┘
-
-CSRESOURCE.tags|cdkTagManager
-CSTACK.tags
-TagManager.of(CSRESOURCE)->CTAGM  #CTAGM (v1|v2, depending on RESOURCE)
-new TagManager(TAGTYPE_ENUM,      #CTAGM. RESPROP Tags
- 'RESTYPE'[, TAGS_OBJ[, OPTS]])   #TAGS_OBJ is renderTags()'s value
-
-CTAGM.setTag('TAG', 'VAL'[, NUM]) #NUM is TOPTS.priority
-CTAGM.removeTag('TAG', NUM)       #
-CTAGM.tagValues()->TAGS_OBJ       #
-CTAGM.hasTags()->BOOL             #
-
-OPTS.renderedTags                 #TAGS_FOBJ_RV
-CTAGM.renderTags                  #TAGS_OBJ (def: {}) are merged in
- ([TAGS_OBJ])->TAGS_FOBJ          #undefined if empty
-TAGS_FOBJ                         #TAGS in the format expected by CloudFormation, according to TagType
-TagType ENUM                      #Shape of TAGS, which differs per SERVICE
-TagType STANDARD                  #[{ key, value },...]. Most common
-                                  #Can also include any OBJ ("dynamic TAGs"), which are kept as is
-TagType MAP                       #TAGS_OBJ, i.e. { KEY: value, ... }. Second most common
-TagType KEY_VALUE                 #[{ Key, Value },...]. Least common
-                                  #As input, must be lowercase'd
-TagType AUTOSCALING_GROUP         #Like STANDARD, but OBJ can also have propagateAtLaunch BOOL (def: false)
-                                  #  - set as CTAGM.setTag(..., BOOL) or TOPTS.applyToLaunchedInstances
-                                  #Only for AutoScalingGroup
-TagType NOT_TAGGABLE              #Always empty []
-
-OPTS.tagPropertyName              #'RESPROP' (def: 'tags')
 
                                   ┌─────────────────┐
                                   │   RESOURCE L2   │
