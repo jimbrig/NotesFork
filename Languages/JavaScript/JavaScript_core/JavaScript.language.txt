@@ -1478,7 +1478,7 @@ DISPLAYNAMES.of(STR)->STR2        #
 new Intl.NumberFormat             #Number locale formatting
  ([LOCALEOPTS])                   #OPTS:
                                   #  - style 'decimal|currency|percent|unit' (def: 'decimal')
-                                  #  - useGrouping BOOL (def: auto): throusands separators
+                                  #  - useGrouping BOOL (def: auto): thousands separators
                             19.0.0#    Can also be:
                             19.0.0#      - 'never|always' (like false|true)
                             19.0.0#      - 'auto' (def): depends on locale
