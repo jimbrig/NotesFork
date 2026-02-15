@@ -53,15 +53,8 @@ STREAM.isReadonly                 #BOOL. True, unless no request body
                                   └─────────────┘
 
 OPTS.*                            #Same as HTTP.request(), i.e.:
-                                  #  - protocol STR (def: 'http:')
-                                  #  - host[name] STR (def: "localhost")
-                                  #     - prefer hostname
-                                  #     - will fire exception if non existing
-                                  #  - family 4|6 (def: both)
-                                  #  - port PORT_NUM (def: 80)
                                   #  - localAddress STR
                                   #  - method STR (def: "GET")
-                                  #  - path STR (def: "/"): including hash and query string
                                   #  - headers OBJ
                                   #  - auth STR: e.g. "auth:password"
                                   #  - https.rejectUnauthorized|checkServerIdentity|certificateAuthority|certificate|key|passphrase|pfx|serverName|secureOptions
@@ -71,8 +64,16 @@ OPTS.*                            #Same as HTTP.request(), i.e.:
                                   #  - setHost BOOL (def: true)
                                   #  - maxHeaderSize NUM
                                   #Not:
-                                  #  - OPTS.socketPath:
-                                  #     - should use '[PROTO://]unix:/SOCKET_PATH:/URI_PATH' URL instead
+                                  #  (use URL instead)
+                                  #  - protocol STR (def: 'http:')
+                                  #  - host[name] STR (def: "localhost")
+                                  #     - prefer hostname
+                                  #     - will fire exception if non existing
+                                  #  - family 4|6 (def: both)
+                                  #  - port PORT_NUM (def: 80)
+                                  #  - path STR (def: "/"): including hash and query string
+                                  #  (use '[PROTO://]unix:/SOCKET_PATH:/URI_PATH' URL instead)
+                                  #  - socketPath STR
 
 OPTS.url                          #URL|'URL'
 OPTS.prefixUrl                    #URL|'URL': prepended to OPTS.url
