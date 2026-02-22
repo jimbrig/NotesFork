@@ -4,6 +4,7 @@
                                   ┗━━━━━━━━━━━━━━━━━━┛
 
 ALTERNATIVES ==>                  #  - tinygradient: basis
+                                  #  - console-gradient: my own library
                                   #  - gradient-string: on a STR
                                   #     - per char or line
                                   #     - does not handle invisible chars, Astral chars, fullwidth
